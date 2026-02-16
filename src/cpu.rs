@@ -67,6 +67,13 @@ impl Cpu {
                     self.pc = (self.pc & 0x0F00) | addr8 as u16;
                 }
             }
+            Instruction::Fim { pair, imm8 } => {
+                let reg_a = (pair << 1) as usize;
+                let reg_b = reg_a + 1;
+
+                self.r[reg_a] = (imm8 >> 4) & 0xF;
+                self.r[reg_b] = imm8 & 0xF;
+            }
             _ => {}
         }
     }

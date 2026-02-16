@@ -1,3 +1,6 @@
+use crate::isa::Instruction;
+// use crate::mem::Memory;
+
 struct Cpu {
     pub acc: u8, // 4-bit accumulator
     pub cy: bool, // 1-bit carry flag
@@ -35,18 +38,25 @@ impl Cpu {
         self.sp = 0;
     }
 
-    pub fn step(&mut self) {
-        let instruction = self.fetch();
-        self.execute(instruction);
-    }
+    // pub fn step<M: Memory>(&mut self, mem: &mut M) -> Result<(), String> {
+    //     // 1) fetch
+    //     let opcode = mem.read_byte(self.pc);
+    //     let next = mem.read_byte(self.pc.wrapping_add(1));
 
-    fn fetch(&mut self) -> u8 {
-        let instruction = self.rom[self.pc];
-        self.pc += 1;
-        instruction
-    }
-    
-    fn execute(&mut self, instruction: u8) {
-        //!TODO: Execute instruction
-    }
+    //     // 2) decode (ISA)
+    //     let instr = crate::isa::decode(opcode, Some(next));
+
+    //     // 3) advance PC by instruction size (default)
+    //     self.pc = self.pc.wrapping_add(instr.size() as u16);
+
+    //     // 4) execute (CPU semantics)
+    //     self.execute(instr, mem)
+    // }
+
+    // fn execute<M: Memory>(&mut self, instr: Instruction, mem: &mut M) -> Result<(), String> {
+    //     match instr {
+    //         Instruction::Nop => {}
+    //     }
+    //     Ok(())
+    // }
 }

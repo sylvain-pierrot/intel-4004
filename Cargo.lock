@@ -3,12 +3,5 @@
 version = 4
 
 [[package]]
-name = "cpu"
-version = "0.1.0"
-
-[[package]]
 name = "intel-4004"
 version = "0.1.0"
-dependencies = [
- "cpu",
-]

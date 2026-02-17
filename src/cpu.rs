@@ -7,7 +7,7 @@ struct Cpu {
     pub r: [u8; 16],     // 4-bit registers (R0–R15)
     pub pc: u16,         // 12-bit program counter
     pub stack: [u16; 3], // 12-bit stack
-    pub sp: u8,          // 2-bit stack pointer
+    pub sp: usize,       // 2-bit stack pointer
     pub data_ram: [[[u8; 16]; 4]; 4],
     ram_addr: u8,
     // TODO: Memory
@@ -57,6 +57,8 @@ impl Cpu {
     }
 
     pub fn execute(&mut self, instr: Instruction) {
+        let pc_at_fetch = self.pc_at_fetch(&instr);
+
         match instr {
             Instruction::Nop => {}
             Instruction::Jcn { cond, addr8 } => {
@@ -73,26 +75,24 @@ impl Cpu {
                 }
             }
             Instruction::Fim { pair, imm8 } => {
-                let (reg_a, reg_b) = Cpu::get_pair(pair);
+                let (ra, rb) = Cpu::get_pair(pair);
 
-                self.r[reg_a] = (imm8 >> 4) & 0xF;
-                self.r[reg_b] = imm8 & 0xF;
+                self.r[ra] = (imm8 >> 4) & 0xF;
+                self.r[rb] = imm8 & 0xF;
             }
             Instruction::Src { pair } => {
-                let (reg_a, reg_b) = Cpu::get_pair(pair);
-
-                self.ram_addr = ((self.r[reg_a] & 0xF) << 4) | (self.r[reg_b] & 0xF);
+                let (ra, rb) = Cpu::get_pair(pair);
+                self.ram_addr = ((self.r[ra] & 0xF) << 4) | (self.r[rb] & 0xF);
             }
             Instruction::Fin { pair } => {
                 // TODO: implement a memory
                 let mem = [0; 4096];
-                let (reg_a, reg_b) = Cpu::get_pair(pair);
+                let (ra, rb) = Cpu::get_pair(pair);
 
-                let fin_pc = self.pc.wrapping_sub(1);
-                let mut page = (fin_pc >> 8) & 0xF;
+                let mut page = (pc_at_fetch >> 8) & 0xF;
 
                 // Exception
-                if (fin_pc & 0xFF) == 0xFF {
+                if (pc_at_fetch & 0xFF) == 0xFF {
                     page = (page + 1) & 0xF;
                 }
 
@@ -100,34 +100,78 @@ impl Cpu {
                 let addr12 = ((page as u16) << 8) | addr8 as u16;
                 let data = mem[addr12 as usize];
 
-                self.r[reg_a] = (data >> 4) & 0xF;
-                self.r[reg_b] = data & 0xF;
+                self.r[ra] = (data >> 4) & 0xF;
+                self.r[rb] = data & 0xF;
             }
             Instruction::Jin { pair } => {
-                let jin_pc = self.pc.wrapping_sub(1);
-                let mut page = (jin_pc >> 8) & 0xF;
+                let mut page = (pc_at_fetch >> 8) & 0xF;
 
                 // Exception
-                if (jin_pc & 0xFF) == 0xFF {
+                if (pc_at_fetch & 0xFF) == 0xFF {
                     page = (page + 1) & 0xF;
                 }
 
                 let addr8 = self.get_pair_content(pair);
                 self.pc = ((page as u16) << 8) | addr8 as u16;
             }
+            Instruction::Jun { addr12 } => self.pc = addr12,
+            Instruction::Jms { addr12 } => {
+                self.stack_write(self.pc);
+                self.pc = addr12;
+            }
+            Instruction::Inc { reg } => self.r[reg] = (self.r[reg] + 1) & 0xF,
+            Instruction::Isz { reg, addr8 } => {
+                self.r[reg] = (self.r[reg] + 1) & 0xF;
+
+                if self.r[reg] != 0 {
+                    let mut page = (pc_at_fetch >> 8) & 0xF;
+
+                    // Exception
+                    if (pc_at_fetch & 0xFF) >= 0xFE {
+                        page = (page + 1) & 0xF;
+                    }
+
+                    self.pc = ((page as u16) << 8) | addr8 as u16;
+                }
+            }
+            Instruction::Add { reg } => {
+                let sum = (self.acc & 0xF) + (self.r[reg] & 0xF) + (self.cy as u8);
+                self.cy = sum > 0xF;
+                self.acc = sum & 0xF;
+            }
+            Instruction::Sub { reg } => {
+                let r = self.r[reg] & 0xF;
+                let sum = (self.acc & 0xF) + ((!r) & 0xF) + (self.cy as u8);
+                self.cy = sum > 0xF;
+                self.acc = sum & 0xF;
+            }
             _ => {}
         }
     }
 
-    fn get_pair(pair: u8) -> (usize, usize) {
-        let reg_a = (pair << 1) as usize;
-        let reg_b = reg_a + 1;
-
-        (reg_a, reg_b)
+    fn pc_at_fetch(&self, instr: &Instruction) -> u16 {
+        self.pc.wrapping_sub(instr.size() as u16)
     }
 
-    fn get_pair_content(&self, pair: u8) -> u8 {
-        let (reg_a, reg_b) = Self::get_pair(pair);
-        ((self.r[reg_a] & 0xF) << 4) | (self.r[reg_b] & 0xF)
+    fn stack_write(&mut self, addr12: u16) {
+        self.stack[self.sp] = addr12;
+        self.sp = (self.sp + 1) % 3;
+    }
+
+    fn stack_read(&mut self) -> u16 {
+        self.sp = (self.sp + 2) % 3;
+        self.stack[self.sp]
+    }
+
+    fn get_pair(pair: usize) -> (usize, usize) {
+        let ra = pair << 1;
+        let rb = ra + 1;
+
+        (ra, rb)
+    }
+
+    fn get_pair_content(&self, pair: usize) -> u8 {
+        let (ra, rb) = Self::get_pair(pair);
+        ((self.r[ra] & 0xF) << 4) | (self.r[rb] & 0xF)
     }
 }

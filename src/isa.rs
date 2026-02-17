@@ -2,18 +2,18 @@
 pub enum Instruction {
     Nop,
     Jcn { cond: u8, addr8: u8 },
-    Fim { pair: u8, imm8: u8 },
-    Src { pair: u8 },
-    Fin { pair: u8 },
-    Jin { pair: u8 },
+    Fim { pair: usize, imm8: u8 },
+    Src { pair: usize },
+    Fin { pair: usize },
+    Jin { pair: usize },
     Jun { addr12: u16 },
     Jms { addr12: u16 },
-    Inc { reg: u8 },
-    Isz { reg: u8, addr8: u8 },
-    Add { reg: u8 },
-    Sub { reg: u8 },
-    Ld { reg: u8 },
-    Xch { reg: u8 },
+    Inc { reg: usize },
+    Isz { reg: usize, addr8: u8 },
+    Add { reg: usize },
+    Sub { reg: usize },
+    Ld { reg: usize },
+    Xch { reg: usize },
     Bbl { imm4: u8 },
     Ldm { imm4: u8 },
     Wrm,
@@ -62,7 +62,7 @@ impl Instruction {
             },
             0x2 => {
                 let lsb = opa & 0x1;
-                let pair = opa >> 1;
+                let pair = (opa >> 1) as usize;
                 if lsb == 0 {
                     Instruction::Fim {
                         pair,
@@ -74,7 +74,7 @@ impl Instruction {
             }
             0x3 => {
                 let lsb = opa & 0x1;
-                let pair = opa >> 1;
+                let pair = (opa >> 1) as usize;
                 if lsb == 0 {
                     Instruction::Fin { pair }
                 } else {
@@ -89,15 +89,15 @@ impl Instruction {
                 let addr12 = ((opa as u16) << 8) | (next_byte.unwrap() as u16);
                 Instruction::Jms { addr12 }
             }
-            0x6 => Instruction::Inc { reg: opa },
+            0x6 => Instruction::Inc { reg: opa as usize },
             0x7 => Instruction::Isz {
-                reg: opa,
+                reg: opa as usize,
                 addr8: next_byte.unwrap(),
             },
-            0x8 => Instruction::Add { reg: opa },
-            0x9 => Instruction::Sub { reg: opa },
-            0xA => Instruction::Ld { reg: opa },
-            0xB => Instruction::Xch { reg: opa },
+            0x8 => Instruction::Add { reg: opa as usize },
+            0x9 => Instruction::Sub { reg: opa as usize },
+            0xA => Instruction::Ld { reg: opa as usize },
+            0xB => Instruction::Xch { reg: opa as usize },
             0xC => Instruction::Bbl { imm4: opa },
             0xD => Instruction::Ldm { imm4: opa },
             0xE0 => Instruction::Wrm,
@@ -134,7 +134,7 @@ impl Instruction {
         }
     }
 
-    pub fn size(&self) -> u8 {
+    pub fn size(&self) -> usize {
         match self {
             Instruction::Jcn { .. } => 2,
             Instruction::Fim { .. } => 2,

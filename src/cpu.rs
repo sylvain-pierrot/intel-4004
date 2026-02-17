@@ -1,21 +1,16 @@
+use std::mem;
+
 use crate::isa::Instruction;
-// use crate::mem::Memory;
+use crate::memory::data_ram::DataRam;
 
-struct Cpu {
-    pub acc: u8,         // 4-bit accumulator
-    pub cy: bool,        // 1-bit carry flag
-    pub r: [u8; 16],     // 4-bit registers (R0–R15)
-    pub pc: u16,         // 12-bit program counter
-    pub stack: [u16; 3], // 12-bit stack
-    pub sp: usize,       // 2-bit stack pointer
-    pub data_ram: [[[u8; 16]; 4]; 4],
-    ram_addr: u8,
-    // TODO: Memory
-    // pub rom: [u8; 4096], // 8-bit words, 4096 words
-    // pub ram: [u8; 4096], // 8-bit words, 4096 words
-
-    // TODO: IO
-    // pub io: u8, // 4-bit I/O
+pub struct Cpu {
+    acc: u8,         // 4-bit accumulator
+    cy: bool,        // 1-bit carry flag
+    r: [u8; 16],     // 4-bit registers (R0–R15)
+    pc: u16,         // 12-bit program counter
+    stack: [u16; 3], // 12-bit stack
+    sp: usize,       // 2-bit stack pointer
+    data_ram: DataRam,
 }
 
 impl Cpu {
@@ -27,8 +22,7 @@ impl Cpu {
             pc: 0,
             stack: [0; 3],
             sp: 0,
-            data_ram: [[[0; 16]; 4]; 4],
-            ram_addr: 0,
+            data_ram: DataRam::new(),
         }
     }
 
@@ -39,8 +33,7 @@ impl Cpu {
         self.pc = 0;
         self.stack = [0; 3];
         self.sp = 0;
-        self.data_ram = [[[0; 16]; 4]; 4];
-        self.ram_addr = 0;
+        self.data_ram = DataRam::new();
     }
 
     pub fn step(&mut self) {
@@ -80,10 +73,7 @@ impl Cpu {
                 self.r[ra] = (imm8 >> 4) & 0xF;
                 self.r[rb] = imm8 & 0xF;
             }
-            Instruction::Src { pair } => {
-                let (ra, rb) = Cpu::get_pair(pair);
-                self.ram_addr = ((self.r[ra] & 0xF) << 4) | (self.r[rb] & 0xF);
-            }
+            Instruction::Src { pair } => self.data_ram.src(self.get_pair_content(pair)),
             Instruction::Fin { pair } => {
                 // TODO: implement a memory
                 let mem = [0; 4096];
@@ -97,7 +87,7 @@ impl Cpu {
                 }
 
                 let addr8 = ((self.r[0] & 0xF) << 4) | (self.r[1] & 0xF);
-                let addr12 = ((page as u16) << 8) | addr8 as u16;
+                let addr12 = (page << 8) | addr8 as u16;
                 let data = mem[addr12 as usize];
 
                 self.r[ra] = (data >> 4) & 0xF;
@@ -112,7 +102,7 @@ impl Cpu {
                 }
 
                 let addr8 = self.get_pair_content(pair);
-                self.pc = ((page as u16) << 8) | addr8 as u16;
+                self.pc = (page << 8) | addr8 as u16;
             }
             Instruction::Jun { addr12 } => self.pc = addr12,
             Instruction::Jms { addr12 } => {
@@ -131,7 +121,7 @@ impl Cpu {
                         page = (page + 1) & 0xF;
                     }
 
-                    self.pc = ((page as u16) << 8) | addr8 as u16;
+                    self.pc = (page << 8) | addr8 as u16;
                 }
             }
             Instruction::Add { reg } => {
@@ -145,11 +135,47 @@ impl Cpu {
                 self.cy = sum > 0xF;
                 self.acc = sum & 0xF;
             }
+            Instruction::Ld { reg } => self.acc = self.r[reg],
+            Instruction::Xch { reg } => mem::swap(&mut self.acc, &mut self.r[reg]),
+            Instruction::Bbl { imm4 } => {
+                self.pc = self.stack_read();
+                self.acc = imm4;
+            }
+            Instruction::Ldm { imm4 } => self.acc = imm4,
+            Instruction::Wrm => self.data_ram.write_main(self.acc),
+            Instruction::Wmp => todo!(),
+            Instruction::Wrr => todo!(),
+            Instruction::Wr0 => todo!(),
+            Instruction::Wr1 => todo!(),
+            Instruction::Wr2 => todo!(),
+            Instruction::Wr3 => todo!(),
+            Instruction::Sbm => todo!(),
+            Instruction::Rdm => todo!(),
+            Instruction::Rdr => todo!(),
+            Instruction::Adm => todo!(),
+            Instruction::Rd0 => todo!(),
+            Instruction::Rd1 => todo!(),
+            Instruction::Rd2 => todo!(),
+            Instruction::Rd3 => todo!(),
+            Instruction::Clb => todo!(),
+            Instruction::Clc => todo!(),
+            Instruction::Iac => todo!(),
+            Instruction::Cmc => todo!(),
+            Instruction::Cma => todo!(),
+            Instruction::Ral => todo!(),
+            Instruction::Rar => todo!(),
+            Instruction::Tcc => todo!(),
+            Instruction::Dac => todo!(),
+            Instruction::Tcs => todo!(),
+            Instruction::Stc => todo!(),
+            Instruction::Daa => todo!(),
+            Instruction::Kbp => todo!(),
+            Instruction::Dcl => self.data_ram.dcl((self.acc & 0b0111) as usize),
             _ => {}
         }
     }
 
-    fn pc_at_fetch(&self, instr: &Instruction) -> u16 {
+    fn pc_at_fetch(&mut self, instr: &Instruction) -> u16 {
         self.pc.wrapping_sub(instr.size() as u16)
     }
 
@@ -173,5 +199,11 @@ impl Cpu {
     fn get_pair_content(&self, pair: usize) -> u8 {
         let (ra, rb) = Self::get_pair(pair);
         ((self.r[ra] & 0xF) << 4) | (self.r[rb] & 0xF)
+    }
+}
+
+impl Default for Cpu {
+    fn default() -> Self {
+        Self::new()
     }
 }

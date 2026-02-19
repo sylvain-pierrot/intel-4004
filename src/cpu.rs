@@ -1,53 +1,55 @@
 use crate::isa::Instruction;
-use crate::memory::Memory;
+use crate::memory::data::DataMemory;
+use crate::memory::program::ProgramMemory;
 
-pub struct Cpu<M: Memory + Default> {
+pub struct Cpu {
     acc: u8,         // 4-bit accumulator
-    cy: bool,        // 1-bit carry flag
+    cy: u8,          // 1-bit carry flag
     r: [u8; 16],     // 4-bit registers (R0–R15)
     pc: u16,         // 12-bit program counter
     stack: [u16; 3], // 12-bit stack
     sp: usize,       // 2-bit stack pointer
-    mem: M,
 }
 
-impl<M: Memory + Default> Cpu<M> {
+impl Cpu {
     pub fn new() -> Self {
         Self {
             acc: 0,
-            cy: false,
+            cy: 0,
             r: [0; 16],
             pc: 0,
             stack: [0; 3],
             sp: 0,
-            mem: M::default(),
         }
     }
 
     pub fn reset(&mut self) {
         self.acc = 0;
-        self.cy = false;
+        self.cy = 0;
         self.r = [0; 16];
         self.pc = 0;
         self.stack = [0; 3];
         self.sp = 0;
-        self.mem = M::default();
     }
 
-    pub fn step(&mut self) {
-        // TODO: implement a memory
-        let mem = [0; 4096];
-
-        let opcode = mem[self.pc as usize];
-        let next_byte = mem[self.pc.wrapping_add(1) as usize];
+    pub fn step<P: ProgramMemory, D: DataMemory>(&mut self, prog: &P, data: &mut D) {
+        let opcode = prog.read_byte(self.pc);
+        let next_byte = prog.read_byte(self.pc.wrapping_add(1));
 
         let instr = Instruction::decode(opcode, Some(next_byte));
         self.pc = self.pc.wrapping_add(instr.size() as u16);
 
-        self.execute(instr);
+        self.execute(instr, prog, data);
+
+        println!("PC={:03X} ACC={} CY={}", self.pc, self.acc, self.cy);
     }
 
-    pub fn execute(&mut self, instr: Instruction) {
+    pub fn execute<P: ProgramMemory, D: DataMemory>(
+        &mut self,
+        instr: Instruction,
+        prog: &P,
+        data: &mut D,
+    ) {
         let pc_at_fetch = self.pc_at_fetch(&instr);
 
         match instr {
@@ -59,23 +61,22 @@ impl<M: Memory + Default> Cpu<M> {
                 let _test_sig = (cond & 0b0001) != 0;
 
                 // TODO: add TEST pin (hardware pin)
-                let jump = ((test_acc && (self.acc & 0xF) == 0) || (test_cy && self.cy)) ^ invert;
+                let jump =
+                    ((test_acc && (self.acc & 0xF) == 0) || (test_cy && self.cy != 0)) ^ invert;
 
                 if jump {
                     self.pc = (self.pc & 0x0F00) | addr8 as u16;
                 }
             }
             Instruction::Fim { pair, imm8 } => {
-                let (ra, rb) = Cpu::<M>::get_pair(pair);
+                let (ra, rb) = Cpu::get_pair(pair);
 
                 self.r[ra] = (imm8 >> 4) & 0xF;
                 self.r[rb] = imm8 & 0xF;
             }
-            Instruction::Src { pair } => self.mem.src(self.get_pair_content(pair)),
+            Instruction::Src { pair } => data.src(self.get_pair_content(pair)),
             Instruction::Fin { pair } => {
-                // TODO: implement a memory
-                let mem = [0; 4096];
-                let (ra, rb) = Cpu::<M>::get_pair(pair);
+                let (ra, rb) = Cpu::get_pair(pair);
 
                 let mut page = (pc_at_fetch >> 8) & 0xF;
 
@@ -84,12 +85,12 @@ impl<M: Memory + Default> Cpu<M> {
                     page = (page + 1) & 0xF;
                 }
 
-                let addr8 = ((self.r[0] & 0xF) << 4) | (self.r[1] & 0xF);
+                let addr8 = self.get_pair_content(0);
                 let addr12 = (page << 8) | addr8 as u16;
-                let data = mem[addr12 as usize];
+                let value = prog.read_byte(addr12);
 
-                self.r[ra] = (data >> 4) & 0xF;
-                self.r[rb] = data & 0xF;
+                self.r[ra] = (value >> 4) & 0xF;
+                self.r[rb] = value & 0xF;
             }
             Instruction::Jin { pair } => {
                 let mut page = (pc_at_fetch >> 8) & 0xF;
@@ -123,14 +124,14 @@ impl<M: Memory + Default> Cpu<M> {
                 }
             }
             Instruction::Add { reg } => {
-                let sum = (self.acc & 0xF) + (self.r[reg] & 0xF) + (self.cy as u8);
-                self.cy = sum > 0xF;
+                let sum = (self.acc & 0xF) + (self.r[reg] & 0xF) + self.cy;
+                self.cy = ((sum > 0xF) as u8) & 1;
                 self.acc = sum & 0xF;
             }
             Instruction::Sub { reg } => {
                 let r = self.r[reg] & 0xF;
-                let sum = (self.acc & 0xF) + ((!r) & 0xF) + (self.cy as u8);
-                self.cy = sum > 0xF;
+                let sum = (self.acc & 0xF) + ((!r) & 0xF) + self.cy;
+                self.cy = ((sum > 0xF) as u8) & 1;
                 self.acc = sum & 0xF;
             }
             Instruction::Ld { reg } => self.acc = self.r[reg],
@@ -140,62 +141,62 @@ impl<M: Memory + Default> Cpu<M> {
                 self.acc = imm4;
             }
             Instruction::Ldm { imm4 } => self.acc = imm4,
-            Instruction::Wrm => self.mem.write_character(self.acc),
+            Instruction::Wrm => data.write_character(self.acc),
             Instruction::Wmp => todo!(),
             Instruction::Wrr => todo!(),
-            Instruction::Wr0 => self.mem.write_status_character(0, self.acc),
-            Instruction::Wr1 => self.mem.write_status_character(1, self.acc),
-            Instruction::Wr2 => self.mem.write_status_character(2, self.acc),
-            Instruction::Wr3 => self.mem.write_status_character(3, self.acc),
+            Instruction::Wr0 => data.write_status_character(0, self.acc),
+            Instruction::Wr1 => data.write_status_character(1, self.acc),
+            Instruction::Wr2 => data.write_status_character(2, self.acc),
+            Instruction::Wr3 => data.write_status_character(3, self.acc),
             Instruction::Sbm => todo!(),
             Instruction::Rdm => todo!(),
             Instruction::Rdr => todo!(),
             Instruction::Adm => todo!(),
-            Instruction::Rd0 => self.acc = self.mem.read_status_character(0),
-            Instruction::Rd1 => self.acc = self.mem.read_status_character(1),
-            Instruction::Rd2 => self.acc = self.mem.read_status_character(2),
-            Instruction::Rd3 => self.acc = self.mem.read_status_character(3),
+            Instruction::Rd0 => self.acc = data.read_status_character(0),
+            Instruction::Rd1 => self.acc = data.read_status_character(1),
+            Instruction::Rd2 => self.acc = data.read_status_character(2),
+            Instruction::Rd3 => self.acc = data.read_status_character(3),
             Instruction::Clb => {
                 self.acc = 0;
-                self.cy = false;
+                self.cy = 0;
             }
-            Instruction::Clc => self.cy = false,
+            Instruction::Clc => self.cy = 0,
             Instruction::Iac => {
                 let inc = self.acc.wrapping_add(1);
-                self.cy = inc > 0xF;
+                self.cy = ((inc > 0xF) as u8) & 1;
                 self.acc = inc & 0xF;
             }
             Instruction::Cmc => self.cy = !self.cy,
             Instruction::Cma => self.acc = !self.acc,
             Instruction::Ral => {
                 let hsb = (self.acc >> 3) & 0b1;
-                self.acc = ((self.acc << 1) & 0b1110) | (self.cy as u8) & 0b1;
-                self.cy = hsb != 0;
+                self.acc = ((self.acc << 1) & 0b1110) | self.cy & 0b1;
+                self.cy = hsb;
             }
             Instruction::Rar => {
                 let lsb = self.acc & 0b1;
-                self.acc = ((self.acc >> 1) & 0b0111) | ((self.cy as u8) & 0b1) << 3;
-                self.cy = lsb != 0;
+                self.acc = ((self.acc >> 1) & 0b0111) | (self.cy & 0b1) << 3;
+                self.cy = lsb;
             }
             Instruction::Tcc => {
                 self.acc = 0;
-                self.acc = (self.acc & 0b1110) | (self.cy as u8) & 0b1;
-                self.cy = false;
+                self.acc = (self.acc & 0b1110) | self.cy & 0b1;
+                self.cy = 0;
             }
             Instruction::Dac => {
-                let dec = self.acc.wrapping_sub(1);
-                self.cy = dec <= 0xF;
-                self.acc = dec & 0xF;
+                self.cy = (self.acc != 0) as u8;
+                self.acc = self.acc.wrapping_sub(1) & 0xF;
             }
             Instruction::Tcs => {
-                self.acc = if self.cy { 0xA } else { 0x9 };
-                self.cy = false;
+                self.acc = 0x9 + self.cy;
+                self.cy = 0;
             }
-            Instruction::Stc => self.cy = true,
+            Instruction::Stc => self.cy = 1,
             Instruction::Daa => {
-                if self.cy || self.acc > 0x9 {
-                    let inc = self.acc.wrapping_add(6);
-                    self.cy = inc > 0xF;
+                if self.cy != 0 || self.acc > 0x9 {
+                    let inc = self.acc + 0x6;
+                    self.cy = (inc > 0xF) as u8;
+                    self.acc = inc & 0xF;
                 }
             }
             Instruction::Kbp => {
@@ -208,7 +209,7 @@ impl<M: Memory + Default> Cpu<M> {
                     _ => 0xF,
                 }
             }
-            Instruction::Dcl => self.mem.dcl(self.acc & 0b0111),
+            Instruction::Dcl => data.dcl(self.acc & 0b0111),
             _ => {}
         };
     }
@@ -240,7 +241,7 @@ impl<M: Memory + Default> Cpu<M> {
     }
 }
 
-impl<M: Memory + Default> Default for Cpu<M> {
+impl Default for Cpu {
     fn default() -> Self {
         Self::new()
     }

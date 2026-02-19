@@ -1,4 +1,11 @@
-use crate::memory::Memory;
+pub trait DataMemory {
+    fn src(&mut self, addr: u8);
+    fn dcl(&mut self, value: u8);
+    fn read_character(&self) -> u8;
+    fn read_status_character(&self, nbr: usize) -> u8;
+    fn write_character(&mut self, value: u8);
+    fn write_status_character(&mut self, nbr: usize, value: u8);
+}
 
 pub struct Register {
     characters: [u8; 16],
@@ -20,13 +27,13 @@ impl Default for Register {
     }
 }
 
-pub struct DataRam {
+pub struct DataRam4002 {
     pub banks: [[[Register; 4]; 4]; 8], // bank → chip → register
     addr8: u8,                          // latch d'adresse (SRC)
     bank: u8,                           // bank sélectionnée (DCL)
 }
 
-impl DataRam {
+impl DataRam4002 {
     pub fn new() -> Self {
         Self {
             banks: std::array::from_fn(|_| {
@@ -45,7 +52,7 @@ impl DataRam {
     }
 }
 
-impl Memory for DataRam {
+impl DataMemory for DataRam4002 {
     fn src(&mut self, addr: u8) {
         self.addr8 = addr;
     }
@@ -75,7 +82,7 @@ impl Memory for DataRam {
     }
 }
 
-impl Default for DataRam {
+impl Default for DataRam4002 {
     fn default() -> Self {
         Self::new()
     }

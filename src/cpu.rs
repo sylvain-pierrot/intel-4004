@@ -1,19 +1,17 @@
-use std::mem;
-
 use crate::isa::Instruction;
-use crate::memory::data_ram::DataRam;
+use crate::memory::Memory;
 
-pub struct Cpu {
+pub struct Cpu<M: Memory + Default> {
     acc: u8,         // 4-bit accumulator
     cy: bool,        // 1-bit carry flag
     r: [u8; 16],     // 4-bit registers (R0–R15)
     pc: u16,         // 12-bit program counter
     stack: [u16; 3], // 12-bit stack
     sp: usize,       // 2-bit stack pointer
-    data_ram: DataRam,
+    mem: M,
 }
 
-impl Cpu {
+impl<M: Memory + Default> Cpu<M> {
     pub fn new() -> Self {
         Self {
             acc: 0,
@@ -22,7 +20,7 @@ impl Cpu {
             pc: 0,
             stack: [0; 3],
             sp: 0,
-            data_ram: DataRam::new(),
+            mem: M::default(),
         }
     }
 
@@ -33,7 +31,7 @@ impl Cpu {
         self.pc = 0;
         self.stack = [0; 3];
         self.sp = 0;
-        self.data_ram = DataRam::new();
+        self.mem = M::default();
     }
 
     pub fn step(&mut self) {
@@ -68,16 +66,16 @@ impl Cpu {
                 }
             }
             Instruction::Fim { pair, imm8 } => {
-                let (ra, rb) = Cpu::get_pair(pair);
+                let (ra, rb) = Cpu::<M>::get_pair(pair);
 
                 self.r[ra] = (imm8 >> 4) & 0xF;
                 self.r[rb] = imm8 & 0xF;
             }
-            Instruction::Src { pair } => self.data_ram.src(self.get_pair_content(pair)),
+            Instruction::Src { pair } => self.mem.src(self.get_pair_content(pair)),
             Instruction::Fin { pair } => {
                 // TODO: implement a memory
                 let mem = [0; 4096];
-                let (ra, rb) = Cpu::get_pair(pair);
+                let (ra, rb) = Cpu::<M>::get_pair(pair);
 
                 let mut page = (pc_at_fetch >> 8) & 0xF;
 
@@ -136,43 +134,83 @@ impl Cpu {
                 self.acc = sum & 0xF;
             }
             Instruction::Ld { reg } => self.acc = self.r[reg],
-            Instruction::Xch { reg } => mem::swap(&mut self.acc, &mut self.r[reg]),
+            Instruction::Xch { reg } => std::mem::swap(&mut self.acc, &mut self.r[reg]),
             Instruction::Bbl { imm4 } => {
                 self.pc = self.stack_read();
                 self.acc = imm4;
             }
             Instruction::Ldm { imm4 } => self.acc = imm4,
-            Instruction::Wrm => self.data_ram.write_main(self.acc),
+            Instruction::Wrm => self.mem.write_character(self.acc),
             Instruction::Wmp => todo!(),
             Instruction::Wrr => todo!(),
-            Instruction::Wr0 => todo!(),
-            Instruction::Wr1 => todo!(),
-            Instruction::Wr2 => todo!(),
-            Instruction::Wr3 => todo!(),
+            Instruction::Wr0 => self.mem.write_status_character(0, self.acc),
+            Instruction::Wr1 => self.mem.write_status_character(1, self.acc),
+            Instruction::Wr2 => self.mem.write_status_character(2, self.acc),
+            Instruction::Wr3 => self.mem.write_status_character(3, self.acc),
             Instruction::Sbm => todo!(),
             Instruction::Rdm => todo!(),
             Instruction::Rdr => todo!(),
             Instruction::Adm => todo!(),
-            Instruction::Rd0 => todo!(),
-            Instruction::Rd1 => todo!(),
-            Instruction::Rd2 => todo!(),
-            Instruction::Rd3 => todo!(),
-            Instruction::Clb => todo!(),
-            Instruction::Clc => todo!(),
-            Instruction::Iac => todo!(),
-            Instruction::Cmc => todo!(),
-            Instruction::Cma => todo!(),
-            Instruction::Ral => todo!(),
-            Instruction::Rar => todo!(),
-            Instruction::Tcc => todo!(),
-            Instruction::Dac => todo!(),
-            Instruction::Tcs => todo!(),
-            Instruction::Stc => todo!(),
-            Instruction::Daa => todo!(),
-            Instruction::Kbp => todo!(),
-            Instruction::Dcl => self.data_ram.dcl((self.acc & 0b0111) as usize),
+            Instruction::Rd0 => self.acc = self.mem.read_status_character(0),
+            Instruction::Rd1 => self.acc = self.mem.read_status_character(1),
+            Instruction::Rd2 => self.acc = self.mem.read_status_character(2),
+            Instruction::Rd3 => self.acc = self.mem.read_status_character(3),
+            Instruction::Clb => {
+                self.acc = 0;
+                self.cy = false;
+            }
+            Instruction::Clc => self.cy = false,
+            Instruction::Iac => {
+                let inc = self.acc.wrapping_add(1);
+                self.cy = inc > 0xF;
+                self.acc = inc & 0xF;
+            }
+            Instruction::Cmc => self.cy = !self.cy,
+            Instruction::Cma => self.acc = !self.acc,
+            Instruction::Ral => {
+                let hsb = (self.acc >> 3) & 0b1;
+                self.acc = ((self.acc << 1) & 0b1110) | (self.cy as u8) & 0b1;
+                self.cy = hsb != 0;
+            }
+            Instruction::Rar => {
+                let lsb = self.acc & 0b1;
+                self.acc = ((self.acc >> 1) & 0b0111) | ((self.cy as u8) & 0b1) << 3;
+                self.cy = lsb != 0;
+            }
+            Instruction::Tcc => {
+                self.acc = 0;
+                self.acc = (self.acc & 0b1110) | (self.cy as u8) & 0b1;
+                self.cy = false;
+            }
+            Instruction::Dac => {
+                let dec = self.acc.wrapping_sub(1);
+                self.cy = dec <= 0xF;
+                self.acc = dec & 0xF;
+            }
+            Instruction::Tcs => {
+                self.acc = if self.cy { 0xA } else { 0x9 };
+                self.cy = false;
+            }
+            Instruction::Stc => self.cy = true,
+            Instruction::Daa => {
+                if self.cy || self.acc > 0x9 {
+                    let inc = self.acc.wrapping_add(6);
+                    self.cy = inc > 0xF;
+                }
+            }
+            Instruction::Kbp => {
+                self.acc = match self.acc {
+                    0x0 => 0x0,
+                    0x1 => 0x1,
+                    0x2 => 0x2,
+                    0x4 => 0x3,
+                    0x8 => 0x4,
+                    _ => 0xF,
+                }
+            }
+            Instruction::Dcl => self.mem.dcl(self.acc & 0b0111),
             _ => {}
-        }
+        };
     }
 
     fn pc_at_fetch(&mut self, instr: &Instruction) -> u16 {
@@ -202,7 +240,7 @@ impl Cpu {
     }
 }
 
-impl Default for Cpu {
+impl<M: Memory + Default> Default for Cpu<M> {
     fn default() -> Self {
         Self::new()
     }

@@ -32,16 +32,34 @@ impl Cpu {
         self.sp = 0;
     }
 
+    pub fn acc(&self) -> u8 {
+        self.acc & 0xF
+    }
+    pub fn cy(&self) -> u8 {
+        self.cy & 1
+    }
+    pub fn pc(&self) -> u16 {
+        self.pc & 0x0FFF
+    }
+
     pub fn step<P: ProgramMemory, D: DataMemory>(&mut self, prog: &P, data: &mut D) {
+        let pc0 = self.pc & 0x0FFF;
+
         let opcode = prog.read_byte(self.pc);
         let next_byte = prog.read_byte(self.pc.wrapping_add(1));
 
         let instr = Instruction::decode(opcode, Some(next_byte));
-        self.pc = self.pc.wrapping_add(instr.size() as u16);
+        self.pc = (self.pc.wrapping_add(instr.size() as u16)) & 0x0FFF;
 
         self.execute(instr, prog, data);
 
-        println!("PC={:03X} ACC={} CY={}", self.pc, self.acc, self.cy);
+        println!(
+            "PC={:03X} OP={:02X} ACC={:X} CY={}",
+            pc0,
+            opcode,
+            self.acc & 0xF,
+            self.cy & 1
+        );
     }
 
     pub fn execute<P: ProgramMemory, D: DataMemory>(
@@ -103,10 +121,10 @@ impl Cpu {
                 let addr8 = self.get_pair_content(pair);
                 self.pc = (page << 8) | addr8 as u16;
             }
-            Instruction::Jun { addr12 } => self.pc = addr12,
+            Instruction::Jun { addr12 } => self.pc = addr12 & 0x0FFF,
             Instruction::Jms { addr12 } => {
                 self.stack_write(self.pc);
-                self.pc = addr12;
+                self.pc = addr12 & 0x0FFF;
             }
             Instruction::Inc { reg } => self.r[reg] = (self.r[reg] + 1) & 0xF,
             Instruction::Isz { reg, addr8 } => {
@@ -148,10 +166,20 @@ impl Cpu {
             Instruction::Wr1 => data.write_status_character(1, self.acc),
             Instruction::Wr2 => data.write_status_character(2, self.acc),
             Instruction::Wr3 => data.write_status_character(3, self.acc),
-            Instruction::Sbm => todo!(),
-            Instruction::Rdm => todo!(),
+            Instruction::Sbm => {
+                let m = data.read_character() & 0xF;
+                let sum = (self.acc & 0xF) + ((!m) & 0xF) + (self.cy & 1);
+                self.cy = ((sum > 0xF) as u8) & 1;
+                self.acc = sum & 0xF;
+            }
+            Instruction::Rdm => self.acc = data.read_character(),
             Instruction::Rdr => todo!(),
-            Instruction::Adm => todo!(),
+            Instruction::Adm => {
+                let m = data.read_character() & 0xF;
+                let sum = m + self.cy + self.acc;
+                self.cy = ((sum > 0xF) as u8) & 1;
+                self.acc = sum & 0xF;
+            }
             Instruction::Rd0 => self.acc = data.read_status_character(0),
             Instruction::Rd1 => self.acc = data.read_status_character(1),
             Instruction::Rd2 => self.acc = data.read_status_character(2),
@@ -166,8 +194,8 @@ impl Cpu {
                 self.cy = ((inc > 0xF) as u8) & 1;
                 self.acc = inc & 0xF;
             }
-            Instruction::Cmc => self.cy = !self.cy,
-            Instruction::Cma => self.acc = !self.acc,
+            Instruction::Cmc => self.cy ^= 1,
+            Instruction::Cma => self.acc = (!self.acc) & 0xF,
             Instruction::Ral => {
                 let hsb = (self.acc >> 3) & 0b1;
                 self.acc = ((self.acc << 1) & 0b1110) | self.cy & 0b1;

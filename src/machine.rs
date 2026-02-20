@@ -18,8 +18,18 @@ impl<P: ProgramMemory, D: DataMemory> Machine<P, D> {
         }
     }
 
+    pub fn cpu(&self) -> &Cpu {
+        &self.cpu
+    }
+
     pub fn run(&mut self) {
         loop {
+            self.cpu.step(&self.program, &mut self.data);
+        }
+    }
+
+    pub fn run_steps(&mut self, n: usize) {
+        for _ in 0..n {
             self.cpu.step(&self.program, &mut self.data);
         }
     }

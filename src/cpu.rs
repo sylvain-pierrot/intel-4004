@@ -1,27 +1,21 @@
 use crate::isa::Instruction;
-// use crate::mem::Memory;
+use crate::memory::data::DataMemory;
+use crate::memory::program::ProgramMemory;
 
-struct Cpu {
-    pub acc: u8, // 4-bit accumulator
-    pub cy: bool, // 1-bit carry flag
-    pub r: [u8; 16], // 4-bit registers (R0–R15)
-    pub pc: u16, // 12-bit program counter
-    pub stack: [u16; 3], // 12-bit stack
-    pub sp: u8, // 2-bit stack pointer
-
-    //!TODO: Memmory
-    // pub rom: [u8; 4096], // 8-bit words, 4096 words
-    // pub ram: [u8; 4096], // 8-bit words, 4096 words
-
-    //!TODO: IO
-    // pub io: u8, // 4-bit I/O
+pub struct Cpu {
+    acc: u8,         // 4-bit accumulator
+    cy: u8,          // 1-bit carry flag
+    r: [u8; 16],     // 4-bit registers (R0–R15)
+    pc: u16,         // 12-bit program counter
+    stack: [u16; 3], // 12-bit stack
+    sp: usize,       // 2-bit stack pointer
 }
 
 impl Cpu {
     pub fn new() -> Self {
         Self {
             acc: 0,
-            cy: false,
+            cy: 0,
             r: [0; 16],
             pc: 0,
             stack: [0; 3],
@@ -31,32 +25,252 @@ impl Cpu {
 
     pub fn reset(&mut self) {
         self.acc = 0;
-        self.cy = false;
+        self.cy = 0;
         self.r = [0; 16];
         self.pc = 0;
         self.stack = [0; 3];
         self.sp = 0;
     }
 
-    // pub fn step<M: Memory>(&mut self, mem: &mut M) -> Result<(), String> {
-    //     // 1) fetch
-    //     let opcode = mem.read_byte(self.pc);
-    //     let next = mem.read_byte(self.pc.wrapping_add(1));
+    pub fn acc(&self) -> u8 {
+        self.acc & 0xF
+    }
+    pub fn cy(&self) -> u8 {
+        self.cy & 1
+    }
+    pub fn pc(&self) -> u16 {
+        self.pc & 0x0FFF
+    }
 
-    //     // 2) decode (ISA)
-    //     let instr = crate::isa::decode(opcode, Some(next));
+    pub fn step<P: ProgramMemory, D: DataMemory>(&mut self, prog: &P, data: &mut D) {
+        let pc0 = self.pc & 0x0FFF;
 
-    //     // 3) advance PC by instruction size (default)
-    //     self.pc = self.pc.wrapping_add(instr.size() as u16);
+        let opcode = prog.read_byte(self.pc);
+        let next_byte = prog.read_byte(self.pc.wrapping_add(1));
 
-    //     // 4) execute (CPU semantics)
-    //     self.execute(instr, mem)
-    // }
+        let instr = Instruction::decode(opcode, Some(next_byte));
+        self.pc = (self.pc.wrapping_add(instr.size() as u16)) & 0x0FFF;
 
-    // fn execute<M: Memory>(&mut self, instr: Instruction, mem: &mut M) -> Result<(), String> {
-    //     match instr {
-    //         Instruction::Nop => {}
-    //     }
-    //     Ok(())
-    // }
+        self.execute(instr, prog, data);
+
+        println!(
+            "PC={:03X} OP={:02X} ACC={:X} CY={}",
+            pc0,
+            opcode,
+            self.acc & 0xF,
+            self.cy & 1
+        );
+    }
+
+    pub fn execute<P: ProgramMemory, D: DataMemory>(
+        &mut self,
+        instr: Instruction,
+        prog: &P,
+        data: &mut D,
+    ) {
+        let pc_at_fetch = self.pc_at_fetch(&instr);
+
+        match instr {
+            Instruction::Nop => {}
+            Instruction::Jcn { cond, addr8 } => {
+                let invert = (cond & 0b1000) != 0;
+                let test_acc = (cond & 0b0100) != 0;
+                let test_cy = (cond & 0b0010) != 0;
+                let _test_sig = (cond & 0b0001) != 0;
+
+                // TODO: add TEST pin (hardware pin)
+                let jump =
+                    ((test_acc && (self.acc & 0xF) == 0) || (test_cy && self.cy != 0)) ^ invert;
+
+                if jump {
+                    self.pc = (self.pc & 0x0F00) | addr8 as u16;
+                }
+            }
+            Instruction::Fim { pair, imm8 } => {
+                let (ra, rb) = Cpu::get_pair(pair);
+
+                self.r[ra] = (imm8 >> 4) & 0xF;
+                self.r[rb] = imm8 & 0xF;
+            }
+            Instruction::Src { pair } => data.src(self.get_pair_content(pair)),
+            Instruction::Fin { pair } => {
+                let (ra, rb) = Cpu::get_pair(pair);
+
+                let mut page = (pc_at_fetch >> 8) & 0xF;
+
+                // Exception
+                if (pc_at_fetch & 0xFF) == 0xFF {
+                    page = (page + 1) & 0xF;
+                }
+
+                let addr8 = self.get_pair_content(0);
+                let addr12 = (page << 8) | addr8 as u16;
+                let value = prog.read_byte(addr12);
+
+                self.r[ra] = (value >> 4) & 0xF;
+                self.r[rb] = value & 0xF;
+            }
+            Instruction::Jin { pair } => {
+                let mut page = (pc_at_fetch >> 8) & 0xF;
+
+                // Exception
+                if (pc_at_fetch & 0xFF) == 0xFF {
+                    page = (page + 1) & 0xF;
+                }
+
+                let addr8 = self.get_pair_content(pair);
+                self.pc = (page << 8) | addr8 as u16;
+            }
+            Instruction::Jun { addr12 } => self.pc = addr12 & 0x0FFF,
+            Instruction::Jms { addr12 } => {
+                self.stack_write(self.pc);
+                self.pc = addr12 & 0x0FFF;
+            }
+            Instruction::Inc { reg } => self.r[reg] = (self.r[reg] + 1) & 0xF,
+            Instruction::Isz { reg, addr8 } => {
+                self.r[reg] = (self.r[reg] + 1) & 0xF;
+
+                if self.r[reg] != 0 {
+                    let mut page = (pc_at_fetch >> 8) & 0xF;
+
+                    // Exception
+                    if (pc_at_fetch & 0xFF) >= 0xFE {
+                        page = (page + 1) & 0xF;
+                    }
+
+                    self.pc = (page << 8) | addr8 as u16;
+                }
+            }
+            Instruction::Add { reg } => {
+                let sum = (self.acc & 0xF) + (self.r[reg] & 0xF) + self.cy;
+                self.cy = ((sum > 0xF) as u8) & 1;
+                self.acc = sum & 0xF;
+            }
+            Instruction::Sub { reg } => {
+                let r = self.r[reg] & 0xF;
+                let sum = (self.acc & 0xF) + ((!r) & 0xF) + self.cy;
+                self.cy = ((sum > 0xF) as u8) & 1;
+                self.acc = sum & 0xF;
+            }
+            Instruction::Ld { reg } => self.acc = self.r[reg],
+            Instruction::Xch { reg } => std::mem::swap(&mut self.acc, &mut self.r[reg]),
+            Instruction::Bbl { imm4 } => {
+                self.pc = self.stack_read();
+                self.acc = imm4;
+            }
+            Instruction::Ldm { imm4 } => self.acc = imm4,
+            Instruction::Wrm => data.write_character(self.acc),
+            Instruction::Wmp => todo!(),
+            Instruction::Wrr => todo!(),
+            Instruction::Wr0 => data.write_status_character(0, self.acc),
+            Instruction::Wr1 => data.write_status_character(1, self.acc),
+            Instruction::Wr2 => data.write_status_character(2, self.acc),
+            Instruction::Wr3 => data.write_status_character(3, self.acc),
+            Instruction::Sbm => {
+                let m = data.read_character() & 0xF;
+                let sum = (self.acc & 0xF) + ((!m) & 0xF) + (self.cy & 1);
+                self.cy = ((sum > 0xF) as u8) & 1;
+                self.acc = sum & 0xF;
+            }
+            Instruction::Rdm => self.acc = data.read_character(),
+            Instruction::Rdr => todo!(),
+            Instruction::Adm => {
+                let m = data.read_character() & 0xF;
+                let sum = m + self.cy + self.acc;
+                self.cy = ((sum > 0xF) as u8) & 1;
+                self.acc = sum & 0xF;
+            }
+            Instruction::Rd0 => self.acc = data.read_status_character(0),
+            Instruction::Rd1 => self.acc = data.read_status_character(1),
+            Instruction::Rd2 => self.acc = data.read_status_character(2),
+            Instruction::Rd3 => self.acc = data.read_status_character(3),
+            Instruction::Clb => {
+                self.acc = 0;
+                self.cy = 0;
+            }
+            Instruction::Clc => self.cy = 0,
+            Instruction::Iac => {
+                let inc = self.acc.wrapping_add(1);
+                self.cy = ((inc > 0xF) as u8) & 1;
+                self.acc = inc & 0xF;
+            }
+            Instruction::Cmc => self.cy ^= 1,
+            Instruction::Cma => self.acc = (!self.acc) & 0xF,
+            Instruction::Ral => {
+                let hsb = (self.acc >> 3) & 0b1;
+                self.acc = ((self.acc << 1) & 0b1110) | self.cy & 0b1;
+                self.cy = hsb;
+            }
+            Instruction::Rar => {
+                let lsb = self.acc & 0b1;
+                self.acc = ((self.acc >> 1) & 0b0111) | (self.cy & 0b1) << 3;
+                self.cy = lsb;
+            }
+            Instruction::Tcc => {
+                self.acc = 0;
+                self.acc = (self.acc & 0b1110) | self.cy & 0b1;
+                self.cy = 0;
+            }
+            Instruction::Dac => {
+                self.cy = (self.acc != 0) as u8;
+                self.acc = self.acc.wrapping_sub(1) & 0xF;
+            }
+            Instruction::Tcs => {
+                self.acc = 0x9 + self.cy;
+                self.cy = 0;
+            }
+            Instruction::Stc => self.cy = 1,
+            Instruction::Daa => {
+                if self.cy != 0 || self.acc > 0x9 {
+                    let inc = self.acc + 0x6;
+                    self.cy = (inc > 0xF) as u8;
+                    self.acc = inc & 0xF;
+                }
+            }
+            Instruction::Kbp => {
+                self.acc = match self.acc {
+                    0x0 => 0x0,
+                    0x1 => 0x1,
+                    0x2 => 0x2,
+                    0x4 => 0x3,
+                    0x8 => 0x4,
+                    _ => 0xF,
+                }
+            }
+            Instruction::Dcl => data.dcl(self.acc & 0b0111),
+            _ => {}
+        };
+    }
+
+    fn pc_at_fetch(&mut self, instr: &Instruction) -> u16 {
+        self.pc.wrapping_sub(instr.size() as u16)
+    }
+
+    fn stack_write(&mut self, addr12: u16) {
+        self.stack[self.sp] = addr12;
+        self.sp = (self.sp + 1) % 3;
+    }
+
+    fn stack_read(&mut self) -> u16 {
+        self.sp = (self.sp + 2) % 3;
+        self.stack[self.sp]
+    }
+
+    fn get_pair(pair: usize) -> (usize, usize) {
+        let ra = pair << 1;
+        let rb = ra + 1;
+
+        (ra, rb)
+    }
+
+    fn get_pair_content(&self, pair: usize) -> u8 {
+        let (ra, rb) = Self::get_pair(pair);
+        ((self.r[ra] & 0xF) << 4) | (self.r[rb] & 0xF)
+    }
+}
+
+impl Default for Cpu {
+    fn default() -> Self {
+        Self::new()
+    }
 }

@@ -1,36 +1,32 @@
-use crate::{
-    cpu::Cpu,
-    memory::{data::DataMemory, program::ProgramMemory},
-};
+use crate::bus::Bus;
+use crate::chips::Cpu4004;
 
-pub struct Machine<P: ProgramMemory, D: DataMemory> {
-    cpu: Cpu,
-    program: P,
-    data: D,
+pub struct Machine<B: Bus> {
+    cpu: Cpu4004,
+    bus: B,
 }
 
-impl<P: ProgramMemory, D: DataMemory> Machine<P, D> {
-    pub fn new(program: P, data: D) -> Self {
+impl<B: Bus> Machine<B> {
+    pub fn new(bus: B) -> Self {
         Self {
-            cpu: Cpu::default(),
-            program,
-            data,
+            cpu: Cpu4004::default(),
+            bus,
         }
     }
 
-    pub fn cpu(&self) -> &Cpu {
+    pub fn cpu(&self) -> &Cpu4004 {
         &self.cpu
     }
 
     pub fn run(&mut self) {
         loop {
-            self.cpu.step(&self.program, &mut self.data);
+            self.cpu.step(&mut self.bus);
         }
     }
 
     pub fn run_steps(&mut self, n: usize) {
         for _ in 0..n {
-            self.cpu.step(&self.program, &mut self.data);
+            self.cpu.step(&mut self.bus);
         }
     }
 }

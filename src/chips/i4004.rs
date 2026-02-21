@@ -1,8 +1,7 @@
+use crate::bus::Bus;
 use crate::isa::Instruction;
-use crate::memory::data::DataMemory;
-use crate::memory::program::ProgramMemory;
 
-pub struct Cpu {
+pub struct Cpu4004 {
     acc: u8,         // 4-bit accumulator
     cy: u8,          // 1-bit carry flag
     r: [u8; 16],     // 4-bit registers (R0–R15)
@@ -11,7 +10,7 @@ pub struct Cpu {
     sp: usize,       // 2-bit stack pointer
 }
 
-impl Cpu {
+impl Cpu4004 {
     pub fn new() -> Self {
         Self {
             acc: 0,
@@ -42,17 +41,18 @@ impl Cpu {
         self.pc & 0x0FFF
     }
 
-    pub fn step<P: ProgramMemory, D: DataMemory>(&mut self, prog: &P, data: &mut D) {
+    pub fn step<B: Bus>(&mut self, bus: &mut B) {
         let pc0 = self.pc & 0x0FFF;
 
-        let opcode = prog.read_byte(self.pc);
-        let next_byte = prog.read_byte(self.pc.wrapping_add(1));
+        let opcode = bus.prog_read(pc0);
+        let next_byte = bus.prog_read(pc0.wrapping_add(1));
 
         let instr = Instruction::decode(opcode, Some(next_byte));
         self.pc = (self.pc.wrapping_add(instr.size() as u16)) & 0x0FFF;
 
-        self.execute(instr, prog, data);
+        self.execute(instr, bus);
 
+        #[cfg(feature = "debug")]
         println!(
             "PC={:03X} OP={:02X} ACC={:X} CY={}",
             pc0,
@@ -62,12 +62,7 @@ impl Cpu {
         );
     }
 
-    pub fn execute<P: ProgramMemory, D: DataMemory>(
-        &mut self,
-        instr: Instruction,
-        prog: &P,
-        data: &mut D,
-    ) {
+    pub fn execute<B: Bus>(&mut self, instr: Instruction, bus: &mut B) {
         let pc_at_fetch = self.pc_at_fetch(&instr);
 
         match instr {
@@ -87,14 +82,14 @@ impl Cpu {
                 }
             }
             Instruction::Fim { pair, imm8 } => {
-                let (ra, rb) = Cpu::get_pair(pair);
+                let (ra, rb) = Cpu4004::get_pair(pair);
 
                 self.r[ra] = (imm8 >> 4) & 0xF;
                 self.r[rb] = imm8 & 0xF;
             }
-            Instruction::Src { pair } => data.src(self.get_pair_content(pair)),
+            Instruction::Src { pair } => bus.data_set_address(self.get_pair_content(pair)),
             Instruction::Fin { pair } => {
-                let (ra, rb) = Cpu::get_pair(pair);
+                let (ra, rb) = Cpu4004::get_pair(pair);
 
                 let mut page = (pc_at_fetch >> 8) & 0xF;
 
@@ -105,7 +100,7 @@ impl Cpu {
 
                 let addr8 = self.get_pair_content(0);
                 let addr12 = (page << 8) | addr8 as u16;
-                let value = prog.read_byte(addr12);
+                let value = bus.prog_read(addr12);
 
                 self.r[ra] = (value >> 4) & 0xF;
                 self.r[rb] = value & 0xF;
@@ -159,31 +154,31 @@ impl Cpu {
                 self.acc = imm4;
             }
             Instruction::Ldm { imm4 } => self.acc = imm4,
-            Instruction::Wrm => data.write_character(self.acc),
-            Instruction::Wmp => todo!(),
-            Instruction::Wrr => todo!(),
-            Instruction::Wr0 => data.write_status_character(0, self.acc),
-            Instruction::Wr1 => data.write_status_character(1, self.acc),
-            Instruction::Wr2 => data.write_status_character(2, self.acc),
-            Instruction::Wr3 => data.write_status_character(3, self.acc),
+            Instruction::Wrm => bus.data_write(self.acc),
+            Instruction::Wmp => bus.ram_port_write(self.acc),
+            Instruction::Wrr => bus.rom_port_write(self.acc),
+            Instruction::Wr0 => bus.data_write_status(0, self.acc),
+            Instruction::Wr1 => bus.data_write_status(1, self.acc),
+            Instruction::Wr2 => bus.data_write_status(2, self.acc),
+            Instruction::Wr3 => bus.data_write_status(3, self.acc),
             Instruction::Sbm => {
-                let m = data.read_character() & 0xF;
+                let m = bus.data_read() & 0xF;
                 let sum = (self.acc & 0xF) + ((!m) & 0xF) + (self.cy & 1);
                 self.cy = ((sum > 0xF) as u8) & 1;
                 self.acc = sum & 0xF;
             }
-            Instruction::Rdm => self.acc = data.read_character(),
-            Instruction::Rdr => todo!(),
+            Instruction::Rdm => self.acc = bus.data_read(),
+            Instruction::Rdr => self.acc = bus.rom_port_read(),
             Instruction::Adm => {
-                let m = data.read_character() & 0xF;
+                let m = bus.data_read() & 0xF;
                 let sum = m + self.cy + self.acc;
                 self.cy = ((sum > 0xF) as u8) & 1;
                 self.acc = sum & 0xF;
             }
-            Instruction::Rd0 => self.acc = data.read_status_character(0),
-            Instruction::Rd1 => self.acc = data.read_status_character(1),
-            Instruction::Rd2 => self.acc = data.read_status_character(2),
-            Instruction::Rd3 => self.acc = data.read_status_character(3),
+            Instruction::Rd0 => self.acc = bus.data_read_status(0),
+            Instruction::Rd1 => self.acc = bus.data_read_status(1),
+            Instruction::Rd2 => self.acc = bus.data_read_status(2),
+            Instruction::Rd3 => self.acc = bus.data_read_status(3),
             Instruction::Clb => {
                 self.acc = 0;
                 self.cy = 0;
@@ -237,7 +232,7 @@ impl Cpu {
                     _ => 0xF,
                 }
             }
-            Instruction::Dcl => data.dcl(self.acc & 0b0111),
+            Instruction::Dcl => bus.data_select_bank(self.acc & 0b0111),
             _ => {}
         };
     }
@@ -269,7 +264,7 @@ impl Cpu {
     }
 }
 
-impl Default for Cpu {
+impl Default for Cpu4004 {
     fn default() -> Self {
         Self::new()
     }

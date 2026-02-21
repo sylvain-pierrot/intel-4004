@@ -1,16 +1,14 @@
-use intel_4004::bus::simple::SimpleBus;
-use intel_4004::chips::{DataRam4002, Rom4001};
-use intel_4004::dev::terminal::Terminal;
-use intel_4004::machine::Machine;
+mod cli;
 
-fn main() {
-    // let rom = Rom::from_bytes(&[
-    //     0xD0, // LDM 0
-    //     0xF2, // IAC
-    //     0xF2, // IAC
-    //     0x40, 0x01, // JUN 0x001
-    // ]);
-    let rom = Rom4001::from_bytes(&[
+use msc_4::Msc4;
+use msc_4::bus::simple::SimpleBus;
+use msc_4::chips::{DataRam4002, Rom4001};
+use msc_4::dev::terminal::Terminal;
+
+use clap::Parser;
+
+fn demo_rom() -> Vec<u8> {
+    vec![
         // ---- demo: print "Hi" via RAM port (WMP) ----
         0xD4, 0xE1, 0xD8, 0xE1, // LDM 4, WMP | LDM 8, WMP  -> 'H' (0x48)
         0xD6, 0xE1, 0xD9, 0xE1, // LDM 6, WMP | LDM 9, WMP  -> 'i' (0x69)
@@ -27,13 +25,25 @@ fn main() {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         // ---- JUMP ----
         0xD5, // 028: LDM 5
-    ]);
+    ]
+}
+
+fn main() -> std::io::Result<()> {
+    let cli = cli::Cli::parse();
+
+    let rom = match cli.rom {
+        Some(path) => Rom4001::from_file(path)?,
+        None => Rom4001::from_bytes(&demo_rom()),
+    };
+
     let mut data = DataRam4002::default();
-    data.attach_port(Terminal::new());
+    if cli::wants_terminal(&cli.devices) {
+        data.attach_port(Terminal::new());
+    }
     let bus = SimpleBus::new(rom, data);
 
-    let mut m = Machine::new(bus);
+    let mut msc_4 = Msc4::new(bus);
+    msc_4.run_steps(cli.steps);
 
-    m.run_steps(35);
-    println!();
+    Ok(())
 }

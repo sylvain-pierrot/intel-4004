@@ -5,6 +5,8 @@ edition = "2024"
 
 [features]
 default = []
-debug = []
+debug = ["msc-4/debug"]
 
 [dependencies]
+msc-4 = { path = "src/msc-4" }
+clap = { version = "4", features = ["derive"] }

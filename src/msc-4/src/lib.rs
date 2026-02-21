@@ -1,12 +1,17 @@
+pub mod bus;
+pub mod chips;
+pub mod dev;
+pub mod isa;
+
 use crate::bus::Bus;
 use crate::chips::Cpu4004;
 
-pub struct Machine<B: Bus> {
+pub struct Msc4<B: Bus> {
     cpu: Cpu4004,
     bus: B,
 }
 
-impl<B: Bus> Machine<B> {
+impl<B: Bus> Msc4<B> {
     pub fn new(bus: B) -> Self {
         Self {
             cpu: Cpu4004::default(),

@@ -1,4 +1,4 @@
-<h1 align="center">intel-4004</h1>
+<h1 align="center">intel-4004 &mdash; MCS-4 Emulator</h1>
 
 <p align="center">
     <em>Intel 4004 Microprocessor Emulator. Built in Silicon, Running in Rust.</em>
@@ -17,7 +17,7 @@
 
 - [Table of Contents](#table-of-contents)
 - [Overview](#overview)
-  - [Why intel-4004?](#why-intel-4004)
+  - [Why **intel-4004 emulator**?](#why-intel-4004-emulator)
 - [Getting started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
@@ -30,17 +30,19 @@
     - [RAM - Intel 4002](#ram---intel-4002)
   - [Bus](#bus)
   - [I/O Devices](#io-devices)
+    - [Terminal Device](#terminal-device)
+    - [UDP Network Device](#udp-network-device)
 - [📗 Instruction Set Reference](#-instruction-set-reference)
   - [Two-byte Instructions](#two-byte-instructions)
   - [One-byte Instructions](#one-byte-instructions)
 
 ## Overview
 
-**intel-4004** is a cycle-accurate emulator of the Intel 4004, the world's first commercially available microprocessor (1971). It implements the full MCS-4 chipset: CPU, ROM, RAM, and I/O, faithfully replicating the original 4-bit architecture and instruction set.
+**intel-4004 emulator** is a cycle-accurate emulator of the Intel 4004, the world's first commercially available microprocessor (1971). It implements the full MCS-4 chipset: CPU, ROM, RAM, and I/O, faithfully replicating the original 4-bit architecture and instruction set.
 
 > Based on the specifications defined in [Intel MCS-4 Assembly Language Programming Manual](https://bitsavers.org/components/intel/MCS4/MCS-4_Assembly_Language_Programming_Manual_Dec73.pdf).
 
-### Why intel-4004?
+### Why **intel-4004 emulator**?
 
 This emulator was built to offer a faithful and extensible MCS-4 system that's:
 
@@ -218,11 +220,68 @@ Implement the `Bus` trait to create custom bus configurations.
 
 The `IoDevice` trait can be implemented to attach peripherals to any chip port.
 
-The bundled `Terminal` device accumulates pairs of 4-bit nibbles and prints the resulting ASCII character to stdout:
+#### Terminal Device
+
+`Terminal` attaches to the RAM port (`WMP`) and prints characters to stdout. The CPU sends two nibbles per character: high nibble first, then low nibble: and the device assembles them into a byte.
+
+**Protocol**: the ROM writes nibbles via `WMP` in this order:
+
+```
+nibble 0   high nibble of byte  ┐
+nibble 1   low nibble of byte   ┘  printed as ASCII char
+```
+
+**Example**: printing `'H'` (0x48) then `'i'` (0x69):
 
 ```rust
+use intel_4004::dev::terminal::Terminal;
+
 let mut ram = DataRam4002::default();
 ram.attach_port(Terminal::new());
+```
+
+```asm
+LDM 4 | WMP   ; high nibble of 'H'
+LDM 8 | WMP   ; low  nibble of 'H' → prints 'H'
+LDM 6 | WMP   ; high nibble of 'i'
+LDM 9 | WMP   ; low  nibble of 'i' → prints 'i'
+```
+
+
+#### UDP Network Device
+
+`UdpDevice` attaches to the ROM port (`WRR`) and sends a UDP datagram each time the CPU finishes writing a complete message. No root or special permissions required.
+
+**Protocol**: the ROM writes nibbles in this order:
+
+```
+nibble 0      length high nibble  ┐
+nibble 1      length low nibble   ┘  byte count (0–255)
+nibble 2, 3   first payload byte (high nibble, then low nibble)
+nibble 4, 5   second payload byte …
+```
+
+Once the last byte is received, `UdpDevice` calls `send()` and resets for the next message.
+
+**Example**: the `udp_hello` example has a hardcoded ROM that sends `"Hi, this is MCS-4\n"` once per second:
+
+```bash
+# terminal 1: listen
+nc -u -l 1234
+
+# terminal 2: run
+cargo run --example udp_hello
+```
+
+```rust
+use intel_4004::dev::udp::UdpDevice;
+use std::time::Duration;
+
+let dev = UdpDevice::new("0.0.0.0:0", "127.0.0.1:1234")?
+    .with_interval(Duration::from_secs(1));
+
+let mut rom = Rom4001::from_bytes(&[ /* ROM bytes */ ]);
+rom.attach_port(dev);
 ```
 
 ---

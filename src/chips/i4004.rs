@@ -202,7 +202,7 @@ impl Cpu4004 {
             Instruction::Daa => {
                 if self.cy != 0 || self.acc > 9 {
                     let inc = self.acc + 6;
-                    self.cy = (inc > 0xF) as u8;
+                    self.cy = self.cy | (inc > 0xF) as u8;
                     self.acc = inc & 0xF;
                 }
             }

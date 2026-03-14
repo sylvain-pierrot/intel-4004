@@ -147,3 +147,57 @@ impl Instruction {
         }
     }
 }
+
+impl std::fmt::Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Instruction::Nop => write!(f, "NOP"),
+            Instruction::Jcn { cond, addr8 } => write!(f, "JCN {:X}H,{:02X}H", cond, addr8),
+            Instruction::Fim { pair, imm8 } => write!(f, "FIM P{},{:02X}H", pair, imm8),
+            Instruction::Src { pair } => write!(f, "SRC P{}", pair),
+            Instruction::Fin { pair } => write!(f, "FIN P{}", pair),
+            Instruction::Jin { pair } => write!(f, "JIN P{}", pair),
+            Instruction::Jun { addr12 } => write!(f, "JUN {:03X}H", addr12),
+            Instruction::Jms { addr12 } => write!(f, "JMS {:03X}H", addr12),
+            Instruction::Inc { reg } => write!(f, "INC R{}", reg),
+            Instruction::Isz { reg, addr8 } => write!(f, "ISZ R{},{:02X}H", reg, addr8),
+            Instruction::Add { reg } => write!(f, "ADD R{}", reg),
+            Instruction::Sub { reg } => write!(f, "SUB R{}", reg),
+            Instruction::Ld { reg } => write!(f, "LD R{}", reg),
+            Instruction::Xch { reg } => write!(f, "XCH R{}", reg),
+            Instruction::Bbl { imm4 } => write!(f, "BBL {}", imm4),
+            Instruction::Ldm { imm4 } => write!(f, "LDM {}", imm4),
+            Instruction::Wrm => write!(f, "WRM"),
+            Instruction::Wmp => write!(f, "WMP"),
+            Instruction::Wrr => write!(f, "WRR"),
+            Instruction::Wpm => write!(f, "WPM"),
+            Instruction::Wr0 => write!(f, "WR0"),
+            Instruction::Wr1 => write!(f, "WR1"),
+            Instruction::Wr2 => write!(f, "WR2"),
+            Instruction::Wr3 => write!(f, "WR3"),
+            Instruction::Sbm => write!(f, "SBM"),
+            Instruction::Rdm => write!(f, "RDM"),
+            Instruction::Rdr => write!(f, "RDR"),
+            Instruction::Adm => write!(f, "ADM"),
+            Instruction::Rd0 => write!(f, "RD0"),
+            Instruction::Rd1 => write!(f, "RD1"),
+            Instruction::Rd2 => write!(f, "RD2"),
+            Instruction::Rd3 => write!(f, "RD3"),
+            Instruction::Clb => write!(f, "CLB"),
+            Instruction::Clc => write!(f, "CLC"),
+            Instruction::Iac => write!(f, "IAC"),
+            Instruction::Cmc => write!(f, "CMC"),
+            Instruction::Cma => write!(f, "CMA"),
+            Instruction::Ral => write!(f, "RAL"),
+            Instruction::Rar => write!(f, "RAR"),
+            Instruction::Tcc => write!(f, "TCC"),
+            Instruction::Dac => write!(f, "DAC"),
+            Instruction::Tcs => write!(f, "TCS"),
+            Instruction::Stc => write!(f, "STC"),
+            Instruction::Daa => write!(f, "DAA"),
+            Instruction::Kbp => write!(f, "KBP"),
+            Instruction::Dcl => write!(f, "DCL"),
+            Instruction::Unknown => write!(f, "???"),
+        }
+    }
+}

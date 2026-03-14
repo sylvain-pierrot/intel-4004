@@ -1,6 +1,7 @@
 use intel_4004::bus::simple::SimpleBus;
 use intel_4004::chips::{DataRam4002, Rom4001};
 use intel_4004::dev::terminal::Terminal;
+use intel_4004::disasm::disassemble;
 use intel_4004::machine::Machine;
 
 fn main() {
@@ -31,9 +32,18 @@ fn main() {
     let mut data = DataRam4002::default();
     data.attach_port(Terminal::new());
     let bus = SimpleBus::new(rom, data);
-
     let mut m = Machine::new(bus);
 
+    println!("=== disassembly ===");
+    let prog = m.bus().prog.bytes();
+    let end = prog.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+    for line in disassemble(&prog[..end]) {
+        println!("{line}");
+    }
+    println!();
+
+    println!("=== execution ===");
     m.run_steps(35);
     println!();
+    println!("cycles: {}", m.cycles());
 }

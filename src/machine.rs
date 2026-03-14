@@ -18,6 +18,18 @@ impl<B: Bus> Machine<B> {
         &self.cpu
     }
 
+    pub fn bus(&self) -> &B {
+        &self.bus
+    }
+
+    pub fn bus_mut(&mut self) -> &mut B {
+        &mut self.bus
+    }
+
+    pub fn cycles(&self) -> u64 {
+        self.cpu.cycles()
+    }
+
     pub fn step(&mut self) {
         self.cpu.step(&mut self.bus);
     }

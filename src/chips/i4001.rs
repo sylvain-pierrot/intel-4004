@@ -26,6 +26,10 @@ impl Rom4001 {
         self.port.attach(Box::new(dev));
     }
 
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
     pub fn read_byte(&self, addr12: u16) -> u8 {
         self.bytes[(addr12 & 0x0FFF) as usize]
     }

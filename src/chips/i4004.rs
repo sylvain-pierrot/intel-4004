@@ -9,6 +9,7 @@ pub struct Cpu4004 {
     pc: u16,         // 12-bit program counter
     stack: [u16; 3], // 12-bit stack (3-level hardware limit)
     sp: usize,       // stack pointer (0–2)
+    cycles: u64,     // elapsed clock periods (8 per 1-byte instr, 16 per 2-byte)
 }
 
 impl Cpu4004 {
@@ -25,6 +26,12 @@ impl Cpu4004 {
     pub fn pc(&self) -> u16 {
         self.pc
     }
+    pub fn reg(&self, n: u8) -> u8 {
+        self.r[(n & 0xF) as usize]
+    }
+    pub fn cycles(&self) -> u64 {
+        self.cycles
+    }
 
     pub fn step<B: Bus>(&mut self, bus: &mut B) {
         let pc0 = self.pc;
@@ -33,13 +40,14 @@ impl Cpu4004 {
 
         let instr = Instruction::decode(opcode, next_byte);
         self.pc = (self.pc + instr.size() as u16) & 0x0FFF;
+        self.cycles += instr.size() as u64 * 8;
 
         self.execute(instr, bus);
 
         #[cfg(feature = "debug")]
         println!(
-            "PC={:03X} OP={:02X} ACC={:X} CY={}",
-            pc0, opcode, self.acc, self.cy
+            "PC={:03X}  {:<12}  ACC={:X} CY={} CLK={}",
+            pc0, instr, self.acc, self.cy, self.cycles
         );
     }
 

@@ -18,14 +18,18 @@ impl<B: Bus> Machine<B> {
         &self.cpu
     }
 
-    pub fn run(&mut self) {
-        loop {
-            self.cpu.step(&mut self.bus);
-        }
+    pub fn step(&mut self) {
+        self.cpu.step(&mut self.bus);
     }
 
     pub fn run_steps(&mut self, n: usize) {
         for _ in 0..n {
+            self.cpu.step(&mut self.bus);
+        }
+    }
+
+    pub fn run_until(&mut self, mut stop: impl FnMut(&Cpu4004) -> bool) {
+        while !stop(&self.cpu) {
             self.cpu.step(&mut self.bus);
         }
     }

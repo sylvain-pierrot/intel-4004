@@ -14,39 +14,38 @@ impl SimpleBus {
 
 impl Bus for SimpleBus {
     fn prog_read(&self, addr12: u16) -> u8 {
-        self.prog.read_byte(addr12 & 0x0FFF)
+        self.prog.read_byte(addr12)
     }
 
     fn data_set_address(&mut self, addr8: u8) {
         self.data.set_address(addr8);
     }
     fn data_select_bank(&mut self, bank: u8) {
-        self.data.select_bank(bank & 0b111);
+        self.data.select_bank(bank);
     }
 
     fn data_read(&self) -> u8 {
-        self.data.read() & 0xF
+        self.data.read()
     }
     fn data_write(&mut self, value: u8) {
-        self.data.write(value & 0xF);
+        self.data.write(value);
     }
 
     fn data_read_status(&self, idx: usize) -> u8 {
-        self.data.read_status(idx) & 0xF
+        self.data.read_status(idx)
     }
     fn data_write_status(&mut self, idx: usize, value: u8) {
-        self.data.write_status(idx, value & 0xF);
+        self.data.write_status(idx, value);
     }
 
     fn rom_port_write(&mut self, value: u8) {
-        self.prog.write_port(value & 0xF);
+        self.prog.write_port(value);
     }
-
     fn rom_port_read(&mut self) -> u8 {
-        self.prog.read_port() & 0xF
+        self.prog.read_port()
     }
 
     fn ram_port_write(&mut self, value: u8) {
-        self.data.write_port(value & 0xF);
+        self.data.write_port(value);
     }
 }

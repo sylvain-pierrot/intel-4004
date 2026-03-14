@@ -8,15 +8,12 @@ pub use i4004::Cpu4004;
 
 use crate::dev::IoDevice;
 
+#[derive(Default)]
 pub struct Port {
     dev: Option<Box<dyn IoDevice>>,
 }
 
 impl Port {
-    pub fn new() -> Self {
-        Self { dev: None }
-    }
-
     pub fn attach(&mut self, dev: Box<dyn IoDevice>) {
         assert!(self.dev.is_none(), "Port already has a device attached");
         self.dev = Some(dev);
@@ -31,12 +28,6 @@ impl Port {
 
     #[inline]
     pub fn read4(&mut self) -> u8 {
-        self.dev.as_mut().map(|d| d.read4() & 0x0F).unwrap_or(0)
-    }
-}
-
-impl Default for Port {
-    fn default() -> Self {
-        Self::new()
+        self.dev.as_mut().map_or(0, |d| d.read4() & 0x0F)
     }
 }
